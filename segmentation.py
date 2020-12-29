@@ -97,24 +97,21 @@ def canny(image):
 
 @copy_image
 def skin_segmentation(img):
-    hsvim = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lower = np.array([0, 48, 80], dtype="uint8")
-    upper = np.array([20, 255, 255], dtype="uint8")
-    skinRegionHSV = cv2.inRange(hsvim, lower, upper)
-    blurred = cv2.blur(skinRegionHSV, (2, 2))
-    ret, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY)
-    return thresh
+    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    in_range = cv2.inRange(img_hsv, (0, 50, 80), (40, 255, 255))
+    blurred = cv2.blur(in_range, (3, 3))
+    return blurred
 
 
 @copy_image
 def biggest_blob(img):
-    cnts, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    cnt = max(cnts, key=cv2.contourArea)
+    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    largest_contour = max(contours, key=cv2.contourArea)
 
     # Output
-    out = np.zeros(img.shape, np.uint8)
-    cv2.drawContours(out, [cnt], -1, 255, cv2.FILLED)
-    return cv2.bitwise_and(img, out)
+    largest_contour_mask = np.zeros(img.shape, np.uint8)
+    cv2.drawContours(largest_contour_mask, [largest_contour], -1, 255, cv2.FILLED)
+    return cv2.bitwise_and(img, largest_contour_mask)
 
 
 @copy_image
