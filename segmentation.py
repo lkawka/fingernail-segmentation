@@ -15,9 +15,9 @@ def dice(pred, true, k=1):
 
 
 def copy_image(func):
-    def inner(img, **kwargs):
+    def inner(img, *args, **kwargs):
         img = img.copy()
-        return func(img, **kwargs)
+        return func(img, *args, **kwargs)
 
     return inner
 
@@ -123,9 +123,9 @@ def blur(img):
 
 
 @copy_image
-def noise_removal(image):
+def noise_removal(image, it=1):
     kernel = np.ones((3, 3), np.uint8)
-    return cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel, iterations=1)
+    return cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel, iterations=it)
 
 
 @copy_image
@@ -150,15 +150,13 @@ def remove_padding(img, k=1):
 
 
 @copy_image
-def fill_holes(im_th):
+def fill_holes(im_th, fill=255):
     im_floodfill = add_padding(im_th)
     h, w = im_floodfill.shape[:2]
     mask = np.zeros((h + 2, w + 2), np.uint8)
-    # Floodfill from point (0, 0)
-    cv2.floodFill(im_floodfill, mask, (0, 0), 255)
+    cv2.floodFill(im_floodfill, mask, (0, 0), fill)
     im_floodfill = remove_padding(im_floodfill)
     im_floodfill_inv = cv2.bitwise_not(im_floodfill)
-    # Combine the two images to get the foreground.
     return im_th | im_floodfill_inv
 
 
@@ -175,13 +173,32 @@ def make_smaller(img, k_shape=(5, 5), iterations=5):
 
 
 @copy_image
+def ycrcb_filter_mask(img, lower, upper):
+    img_YCrCb = cv2.cvtColor(img, cv2.COLOR_BGR2YCR_CB)
+    YCrCb_mask = cv2.inRange(img_YCrCb, lower, upper)
+    YCrCb_mask = cv2.morphologyEx(YCrCb_mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    return YCrCb_mask
+
+
+def skin_filter_mask(img):
+    lower = (0, 135, 85)
+    upper = (255, 180, 135)
+    return ycrcb_filter_mask(img, lower, upper)
+
+
+@copy_image
+def hsv_filter_mask(img, lower, upper):
+    return cv2.inRange(img, lower, upper)
+
+
+@copy_image
 def hand_mask(image):
     s = skin_segmentation(image)
-    s = noise_removal(s)
+    # s = noise_removal(s)
     s = biggest_blob(s)
-    s = blur(s)
-    k_shape = (5, 5)
-    iterations = 5
+    # s = blur(s)
+    k_shape = (7, 7)
+    iterations = 25
     s = make_bigger(s, k_shape=k_shape, iterations=iterations)
     s = fill_holes(s)
     s = make_smaller(s, k_shape=k_shape, iterations=iterations)
@@ -210,18 +227,54 @@ def iou(label, image):
     return iou_score
 
 
+def min_max_stretching(image):
+    image_cs = np.zeros((image.shape[0], image.shape[1]), dtype='uint8')
+
+    # Apply Min-Max Contrasting
+    min = np.min(image)
+    max = np.max(image)
+
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            image_cs[i, j] = 255 * (image[i, j] - min) / (max - min)
+    return image_cs
+
+
+def subtract_masks(mask1, mask2):
+    mask = cv2.subtract(mask1, mask2)
+    # mask = noise_removal2(mask)
+    return mask
+
+
+@copy_image
+def kmeans_mask(img, K=4):
+    k = kmeans(img, K=K)
+
+
 @copy_image
 def process(image):
     h_mask = hand_mask(image)
     h = cv2.bitwise_and(image, image, mask=h_mask)
 
+    k = kmeans(h, K=4)
+    cv2.imshow('k', k)
+
     s = h
-    # p = cv2.normalize(s, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    # p = cv2.cvtColor(p, cv2.COLOR_BGR2GRAY)
+    s = skin_filter_mask(s)
+    # s = apply_brightness_contrast(s, brightness=-16, contrast=64)
+
+    p = h.copy()
+    # p = cv2.normalize(h, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    p = cv2.cvtColor(p, cv2.COLOR_BGR2GRAY)
     # p = apply_brightness_contrast(p, contrast=64)
-    # cv2.imshow('c', p)
-    s = skin_segmentation(s)
-    s = cv2.subtract(h_mask, s)
+    # cv2.imshow('p1', p)
+
+    p = min_max_stretching(p)
+
+    # cv2.imshow('p', p)
+    # cv2.imshow('2', s)
+    s = subtract_masks(h_mask, s)
+
     return s
 
 
@@ -237,19 +290,19 @@ def images():
         yield image, label
 
 
-def compare_results():
+def compare_results(process_fn=process):
     for image, label in images():
         cv2.imshow('org', image)
-        mask = process(image)
+        mask = process_fn(image)
         processed = cv2.bitwise_and(image, image, mask=mask)
         cv2.imshow('processed', processed)
         cv2.waitKey(0)
 
 
-def get_score():
+def get_score(process_fn=process):
     i, sum = 0, 0
     for image, label in images():
-        processed_mask = process(image)
+        processed_mask = process_fn(image)
         sum += iou(label, processed_mask)
         i += 1
     result = sum / i
@@ -257,5 +310,5 @@ def get_score():
 
 
 if __name__ == '__main__':
-    get_score()
-    # compare_results()
+    # get_score()
+    compare_results()
